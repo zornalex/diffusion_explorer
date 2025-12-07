@@ -29,10 +29,14 @@
 
       <!-- Noise Control -->
       <div class="card">
-        <h2>2. Add Noise</h2>
+        <h2>2. Add Noise (Forward Process)</h2>
         <div class="slider-container">
-          <label for="noise-slider">Noise Level: <span id="noise-value">0%</span></label>
-          <input type="range" id="noise-slider" min="0" max="100" value="0">
+          <label for="noise-slider">Time Step (t): <span id="noise-value">0</span> / <span
+              id="max-steps">50</span></label>
+          <input type="range" id="noise-slider" min="0" max="50" value="0">
+        </div>
+        <div class="controls">
+          <button id="btn-autoplay">▶ Auto-Play</button>
         </div>
       </div>
 
