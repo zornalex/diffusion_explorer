@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diffusion Explorer</title>
+</head>
+
+<body>
+  <div id="app">
+    <h1>Diffusion Explorer</h1>
+    <p class="subtitle">Draw something and see it dissolve into noise.</p>
+
+    <div class="main-container">
+      <!-- Input Section -->
+      <div class="card">
+        <h2>1. Draw</h2>
+        <canvas id="drawing-canvas"></canvas>
+        <div class="controls">
+          <button id="btn-clear">Clear</button>
+          <label class="file-upload">
+            Upload
+            <input type="file" id="file-upload" accept="image/*">
+          </label>
+        </div>
+      </div>
+
+      <!-- Noise Control -->
+      <div class="card">
+        <h2>2. Add Noise</h2>
+        <div class="slider-container">
+          <label for="noise-slider">Noise Level: <span id="noise-value">0%</span></label>
+          <input type="range" id="noise-slider" min="0" max="100" value="0">
+        </div>
+      </div>
+
+      <!-- Output Section -->
+      <div class="card">
+        <h2>3. Result</h2>
+        <canvas id="noise-canvas"></canvas>
+        <p class="info">This is how the model sees your image.</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
