@@ -1543,6 +1543,33 @@ input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
   padding: 0 1rem 0.5rem;
 }
 
+.forward-play-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1rem;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    align-self: flex-start;
+}
+.forward-play-btn:hover { opacity: 0.85; }
+.forward-play-btn:active { opacity: 0.7; }
+
+.forward-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
 .forward-slider {
   flex: 1;
 }
