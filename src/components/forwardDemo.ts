@@ -14,7 +14,7 @@ const FRAME_INTERVAL_MS = 15; // ~6 sec for 400 steps
  * if the animation was playing.
  */
 export class ForwardProcessDemo {
-    private readonly ctx: CanvasRenderingContext2D | null;
+    private readonly ctx: CanvasRenderingContext2D;
     private readonly slider: HTMLInputElement;
     private readonly tLabel: HTMLElement;
     private readonly alphaBarLabel: HTMLElement;
@@ -215,7 +215,7 @@ export class ForwardProcessDemo {
     // ── Rendering ────────────────────────────────────────────────────────────
 
     private renderFromCache(t: number): void {
-        if (!this.ctx || this.frames.length === 0) return;
+        if (this.frames.length === 0) return;
         const frame = this.frames[t];
         if (!frame) return;
         renderImageToCanvas(frame, this.ctx);
@@ -238,7 +238,6 @@ export class ForwardProcessDemo {
     }
 
     private renderPlaceholder(): void {
-        if (!this.ctx) return;
         const { canvas } = this.ctx;
         this.ctx.fillStyle = '#1a1a1a';
         this.ctx.fillRect(0, 0, canvas.width, canvas.height);
