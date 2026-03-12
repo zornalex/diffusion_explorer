@@ -1,0 +1,6 @@
+# Python dependencies for the ML pipeline
+# Install with: pip install -r ml/requirements.txt
+
+tensorflow>=2.16.0
+tensorflowjs>=4.20.0
+numpy>=1.24.0

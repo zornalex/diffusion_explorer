@@ -1,152 +1,235 @@
 import './style.css';
-import { DrawingCanvas } from './canvas';
-import { CONFIG } from './config';
-import { DiffusionModel } from './diffusion';
+import { CONFIG }                          from './core/config';
+import { DiffusionModel }                  from './core/diffusion';
+import { ModelTrainer }                    from './core/trainer';
+import { LossChart }                       from './components/lossChart';
+import { renderImageToCanvas, setupCanvas } from './components/renderUtils';
+import { DatasetPanel }                    from './components/datasetPanel';
+import { DenoisingStrip }                  from './components/denoisingStrip';
+import { SMILEY_PRESETS }                  from './data/presets';
+import { RoboticsDemo, FlowMatchingDemo }  from './components/roboticsDemo';
+import { ForwardProcessDemo }              from './components/forwardDemo';
+import { UNetExplorer }                    from './components/unetExplorer';
 
-// Initialize Drawing Canvas
-const drawingCanvas = new DrawingCanvas('drawing-canvas');
+// ─── Core instances ─────────────────────────────────────────────────────────
+const diffusion    = new DiffusionModel();
+const trainer      = new ModelTrainer();
+const lossChart    = new LossChart('loss-chart');
+const datasetPanel = new DatasetPanel('dataset-slots', 5);
+const strip        = new DenoisingStrip('denoising-strip', 'zoom-panel');
 
-// Initialize Diffusion Model
-const diffusionModel = new DiffusionModel();
+trainer.init().then(() => console.log('Trainer ready'));
 
-// Initialize Noise Canvas (Output)
-const noiseCanvas = document.getElementById('noise-canvas') as HTMLCanvasElement;
-const noiseCtx = noiseCanvas.getContext('2d')!;
-noiseCanvas.width = CONFIG.imageSize;
-noiseCanvas.height = CONFIG.imageSize;
-noiseCanvas.style.width = '256px';
-noiseCanvas.style.height = '256px';
-noiseCanvas.style.imageRendering = 'pixelated';
+// ─── Canvas contexts ─────────────────────────────────────────────────────────
+const heroCleanCtx = setupCanvas('hero-canvas-clean',       CONFIG.imageSize, '80px');
+const heroNoisyCtx = setupCanvas('hero-canvas-noisy',       CONFIG.imageSize, '80px');
+const heroPureCtx  = setupCanvas('hero-canvas-pure',        CONFIG.imageSize, '80px');
+const genIntermCtx = setupCanvas('gen-intermediate-canvas', CONFIG.imageSize, '160px');
+const genCtx       = setupCanvas('gen-canvas',              CONFIG.imageSize, '160px');
 
-// UI Elements
-const btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
-const fileUpload = document.getElementById('file-upload') as HTMLInputElement;
-const noiseSlider = document.getElementById('noise-slider') as HTMLInputElement;
-const noiseValue = document.getElementById('noise-value') as HTMLSpanElement;
-const maxStepsValue = document.getElementById('max-steps') as HTMLSpanElement;
-const btnAutoplay = document.getElementById('btn-autoplay') as HTMLButtonElement;
-
-// Set Max Steps in UI
-noiseSlider.max = diffusionModel.getTimesteps().toString();
-maxStepsValue.textContent = diffusionModel.getTimesteps().toString();
-
-// State
-let currentT = 0;
-let isPlaying = false;
-let animationFrameId: number | null = null;
-
-// Event Listeners
-btnClear.addEventListener('click', () => {
-  drawingCanvas.clear();
-  updateNoisyImage();
-});
-
-fileUpload.addEventListener('change', (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
-
-  const img = new Image();
-  img.onload = () => {
-    drawingCanvas.drawImage(img);
-    updateNoisyImage();
-  };
-  img.src = URL.createObjectURL(file);
-});
-
-noiseSlider.addEventListener('input', (e) => {
-  if (isPlaying) stopAutoplay();
-  const val = parseInt((e.target as HTMLInputElement).value);
-  currentT = val;
-  updateUI();
-  updateNoisyImage();
-});
-
-btnAutoplay.addEventListener('click', () => {
-  if (isPlaying) {
-    stopAutoplay();
-  } else {
-    startAutoplay();
-  }
-});
-
-// Also update when drawing ends to keep the noisy view in sync
-document.getElementById('drawing-canvas')?.addEventListener('mouseup', updateNoisyImage);
-document.getElementById('drawing-canvas')?.addEventListener('touchend', updateNoisyImage);
-document.getElementById('drawing-canvas')?.addEventListener('mouseout', updateNoisyImage);
-
-function updateUI() {
-  noiseSlider.value = currentT.toString();
-  noiseValue.textContent = currentT.toString();
+function initDebugCanvas(id: string): CanvasRenderingContext2D {
+    const c = document.getElementById(id) as HTMLCanvasElement;
+    c.width = c.height = CONFIG.imageSize;
+    return c.getContext('2d')!;
 }
 
-function startAutoplay() {
-  isPlaying = true;
-  btnAutoplay.textContent = '⏸ Pause';
+// ─── UI refs ─────────────────────────────────────────────────────────────────
+const btnLoadPresets   = document.getElementById('btn-load-presets')   as HTMLButtonElement;
+const btnClearDataset  = document.getElementById('btn-clear-dataset')  as HTMLButtonElement;
+const btnTrain         = document.getElementById('btn-train')          as HTMLButtonElement;
+const btnSaveModel     = document.getElementById('btn-save-model')     as HTMLButtonElement;
+const btnLoadModel     = document.getElementById('btn-load-model')     as HTMLButtonElement;
+const fileLoadModel    = document.getElementById('file-load-model')    as HTMLInputElement;
+const btnGenerate      = document.getElementById('btn-generate')       as HTMLButtonElement;
+const epochValue       = document.getElementById('epoch-value')        as HTMLSpanElement;
+const maxEpochsEl      = document.getElementById('max-epochs')         as HTMLSpanElement;
+const lossValueEl      = document.getElementById('loss-value')         as HTMLSpanElement;
+const debugT           = document.getElementById('debug-t')            as HTMLSpanElement;
+const genProgressSlider = document.getElementById('gen-progress-slider') as HTMLInputElement;
+const genProgressValue  = document.getElementById('gen-progress-value') as HTMLSpanElement;
+const genProgressMax    = document.getElementById('gen-progress-max')  as HTMLSpanElement;
+const progressFill     = document.getElementById('training-progress-fill') as HTMLElement;
+const progressLabel    = document.getElementById('training-progress-label') as HTMLElement;
+const milestoneRow     = document.getElementById('milestone-row')      as HTMLElement;
+const btnRoboticsPlay  = document.getElementById('btn-robotics-play')  as HTMLButtonElement;
+const btnFlowPlay      = document.getElementById('btn-flow-play')      as HTMLButtonElement;
 
-  // Reset if at end
-  if (currentT >= diffusionModel.getTimesteps()) {
-    currentT = 0;
-  }
+// ─── Init ─────────────────────────────────────────────────────────────────────
+const T = diffusion.getTimesteps();
+maxEpochsEl.textContent       = CONFIG.trainingSteps.toString();
+genProgressSlider.max         = T.toString();
+genProgressMax.textContent    = T.toString();
 
-  const totalSteps = diffusionModel.getTimesteps();
-  // Target ~5 seconds for the full animation
-  // 60 FPS = 16ms per frame. 5000ms / 16ms ≈ 300 frames.
-  // Steps per frame = Total Steps / 300
-  const stepIncrement = Math.max(1, Math.ceil(totalSteps / 300));
+// ─── Hero preview ─────────────────────────────────────────────────────────────
+function renderHeroPreview() {
+    const S = CONFIG.imageSize;
+    const clean = new Float32Array(S * S);
+    const cx = S / 2, cy = S / 2, r = S * 0.3;
+    // Draw circle
+    for (let y = 0; y < S; y++)
+        for (let x = 0; x < S; x++) {
+            const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+            clean[y * S + x] = Math.abs(d - r) < 1.5 ? 0.9 : -0.9;
+        }
+    renderImageToCanvas(clean, heroCleanCtx);
+    renderImageToCanvas(diffusion.addNoise(clean, Math.floor(T * 0.45)), heroNoisyCtx);
+    renderImageToCanvas(diffusion.addNoise(clean, T), heroPureCtx);
+}
+renderHeroPreview();
 
-  const animate = () => {
-    if (!isPlaying) return;
+// ─── Disclosure toggles ───────────────────────────────────────────────────────
+document.querySelectorAll('.disclosure-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const body = btn.nextElementSibling as HTMLElement;
+        const open = body.classList.toggle('open');
+        btn.textContent = btn.textContent!.replace(/^[↓↑]/, open ? '↑' : '↓');
+    });
+});
 
-    if (currentT < totalSteps) {
-      currentT = Math.min(totalSteps, currentT + stepIncrement);
-      updateUI();
-      updateNoisyImage();
-      animationFrameId = requestAnimationFrame(animate);
-    } else {
-      stopAutoplay();
+// ─── Dataset panel ────────────────────────────────────────────────────────────
+btnLoadPresets.addEventListener('click', () => {
+    datasetPanel.loadPresets(SMILEY_PRESETS);
+});
+
+btnClearDataset.addEventListener('click', () => {
+    datasetPanel.clearAll();
+});
+
+// ─── Training ─────────────────────────────────────────────────────────────────
+btnTrain.addEventListener('click', async () => {
+    if (btnTrain.dataset.state === 'running') {
+        trainer.stopTraining();
+        setBtnTrain('idle');
+        btnGenerate.disabled = false;   // allow generation even if stopped early
+        return;
     }
-  };
-  animate();
+
+    const images = datasetPanel.getImages();
+    if (images.length === 0) {
+        alert('Draw at least one image or load the smiley presets first!');
+        return;
+    }
+
+    setBtnTrain('running');
+    lossChart.reset();
+    milestoneRow.style.display = 'none';
+
+    const dbgX0Ctx    = initDebugCanvas('debug-x0');
+    const dbgXtCtx    = initDebugCanvas('debug-xt');
+    const dbgNoiseCtx = initDebugCanvas('debug-noise');
+
+    await trainer.trainOnDataset(images, async (step, loss, dbg) => {
+        epochValue.textContent  = step.toString();
+        lossValueEl.textContent = loss.toFixed(5);
+        lossChart.addPoint(loss);
+
+        // Progress bar
+        const pct = (step / CONFIG.trainingSteps) * 100;
+        progressFill.style.width = `${pct}%`;
+        progressLabel.textContent = `Step ${step} / ${CONFIG.trainingSteps}`;
+
+        // Debug canvases
+        if (dbg) {
+            debugT.textContent = dbg.t.toString();
+            renderImageToCanvas(dbg.x0, dbgX0Ctx);
+            renderImageToCanvas(dbg.xt, dbgXtCtx);
+            renderImageToCanvas(dbg.epsilon, dbgNoiseCtx);
+        }
+
+        // Milestone previews (at ~10%, ~40%, 100% of training)
+        if (step === 200 || step === 800 || step === CONFIG.trainingSteps) {
+            const msId = step === 200 ? 'ms-200' : step === 800 ? 'ms-800' : 'ms-final';
+            milestoneRow.style.display = '';
+            const msCtx = initDebugCanvas(msId);
+            (document.getElementById(msId) as HTMLCanvasElement).style.width = '80px';
+            (document.getElementById(msId) as HTMLCanvasElement).style.height = '80px';
+            await runQuickGenForPreview(msCtx);
+        }
+    });
+
+    setBtnTrain('idle');
+    btnGenerate.disabled = false;
+});
+
+async function runQuickGenForPreview(ctx: CanvasRenderingContext2D) {
+    await trainer.generateImage((_t, data, _p) => {
+        renderImageToCanvas(data, ctx);
+    }, 40); // report every 40 steps for speed
 }
 
-function stopAutoplay() {
-  isPlaying = false;
-  btnAutoplay.textContent = '▶ Auto-Play';
-  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+function setBtnTrain(state: 'idle' | 'running') {
+    btnTrain.dataset.state = state;
+    btnTrain.textContent   = state === 'running' ? '⏹ Stop Training' : '▶ Start Training';
+    btnTrain.className     = state === 'running' ? 'btn-sm' : 'btn-primary-sm';
 }
 
-// Core Logic: Add Noise using Diffusion Model
-function updateNoisyImage() {
-  const originalImageData = drawingCanvas.getImageData();
-  const pixels = originalImageData.data;
+btnSaveModel.addEventListener('click', async () => {
+    const ok = await trainer.saveModel('diffusion-model');
+    alert(ok ? 'Saved to browser storage + downloaded!' : 'Save failed. Check console.');
+});
 
-  // Convert ImageData (Uint8ClampedArray) to Float32Array [-1, 1] for model
-  const x0 = new Float32Array(CONFIG.imageSize * CONFIG.imageSize);
-  for (let i = 0; i < x0.length; i++) {
-    // Normalize 0..255 -> -1..1
-    x0[i] = (pixels[i * 4] / 127.5) - 1.0;
-  }
+btnLoadModel.addEventListener('click', async () => {
+    const ok = await trainer.loadModelFromIndexedDB('diffusion-model');
+    if (ok) btnGenerate.disabled = false;
+    alert(ok ? 'Model loaded from browser storage!' : 'No saved model found. Train first.');
+});
 
-  // Apply Diffusion Forward Process
-  const xt = diffusionModel.addNoise(x0, currentT);
+fileLoadModel.addEventListener('change', async (e) => {
+    const files = (e.target as HTMLInputElement).files;
+    if (!files?.length) return;
+    const ok = await trainer.loadModelFromFiles(files);
+    if (ok) btnGenerate.disabled = false;
+    alert(ok ? 'Model loaded from files!' : 'Failed — select both .json and .bin.');
+    fileLoadModel.value = '';
+});
 
-  // Convert back to ImageData for display
-  const noisyImageData = noiseCtx.createImageData(CONFIG.imageSize, CONFIG.imageSize);
-  const output = noisyImageData.data;
+// ─── Generation ────────────────────────────────────────────────────────────────
+btnGenerate.addEventListener('click', async () => {
+    btnGenerate.disabled  = true;
+    btnGenerate.textContent = '⏳ Generating…';
+    strip.clear();
 
-  for (let i = 0; i < xt.length; i++) {
-    // Denormalize -1..1 -> 0..255
-    let val = (xt[i] + 1.0) * 127.5;
-    val = Math.max(0, Math.min(255, val)); // Clip
+    await trainer.generateImage((_t, data, progress) => {
+        genProgressSlider.value      = progress.toString();
+        genProgressValue.textContent = progress.toString();
+        renderImageToCanvas(data, genIntermCtx);
+        renderImageToCanvas(data, genCtx);
+    }, 5);
 
-    output[i * 4] = val;     // R
-    output[i * 4 + 1] = val; // G
-    output[i * 4 + 2] = val; // B
-    output[i * 4 + 3] = 255; // Alpha
-  }
+    // Populate denoising strip with cached frames
+    strip.load(trainer.lastFrames);
 
-  noiseCtx.putImageData(noisyImageData, 0, 0);
-}
+    btnGenerate.disabled  = false;
+    btnGenerate.textContent = '✨ Generate';
+});
 
-// Initial render
-updateNoisyImage();
+// ─── Architecture section ─────────────────────────────────────────────────────
+
+const forwardDemo = new ForwardProcessDemo(
+    'forward-canvas', 'forward-slider', 'forward-t-label', 'forward-alpha-bar-label', diffusion
+);
+forwardDemo.setBaseImage(SMILEY_PRESETS[0]);
+
+(document.getElementById('forward-preset-select') as HTMLSelectElement).addEventListener('change', (e) => {
+    const idx = parseInt((e.target as HTMLSelectElement).value);
+    forwardDemo.setBaseImage(SMILEY_PRESETS[idx]);
+});
+
+new UNetExplorer('unet-canvas', 'unet-popup');
+
+// ─── Robotics demo ────────────────────────────────────────────────────────────
+const roboticsDemo = new RoboticsDemo('robotics-canvas');
+btnRoboticsPlay.addEventListener('click', () => { roboticsDemo.play(); });
+
+// Auto-animate when section scrolls into view
+new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) roboticsDemo.play();
+}, { threshold: 0.4 }).observe(document.getElementById('section-robotics')!);
+
+// ─── Flow Matching demo ───────────────────────────────────────────────────────
+const flowDemo = new FlowMatchingDemo('flow-canvas');
+btnFlowPlay.addEventListener('click', () => { flowDemo.play(); });
+
+new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) flowDemo.play();
+}, { threshold: 0.4 }).observe(document.getElementById('section-flow')!);

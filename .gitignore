@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# ML pipeline — large binary artifacts
+ml/models/*.keras
+ml/models/*.h5
+ml/models/*_savedmodel/
+public/model/*.bin
+# (public/model/model.json is committed — the browser needs it)
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +29,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Root-level experiment models (large .keras, not for repo)
+model/

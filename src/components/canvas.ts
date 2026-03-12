@@ -1,4 +1,4 @@
-import { CONFIG } from './config';
+import { CONFIG } from '../core/config';
 
 export class DrawingCanvas {
     private canvas: HTMLCanvasElement;
@@ -17,8 +17,8 @@ export class DrawingCanvas {
         this.canvas.height = CONFIG.imageSize;
 
         // Scale up visually with CSS, but keep internal resolution low
-        this.canvas.style.width = '256px';
-        this.canvas.style.height = '256px';
+        this.canvas.style.width = '160px';
+        this.canvas.style.height = '160px';
         this.canvas.style.imageRendering = 'pixelated';
 
         this.initEvents();
