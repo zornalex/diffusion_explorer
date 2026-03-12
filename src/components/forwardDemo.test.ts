@@ -2,6 +2,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ForwardProcessDemo } from './forwardDemo';
 import { DiffusionModel } from '../core/diffusion';
 
+// Mock canvas utilities — happy-dom does not support canvas rendering in CI
+vi.mock('./renderUtils', () => ({
+    setupCanvas: (_id: string, _size: number, _display: string) => {
+        // Return a minimal fake CanvasRenderingContext2D
+        return {
+            canvas: { width: 32, height: 32 },
+            fillStyle: '',
+            font: '',
+            textAlign: '',
+            textBaseline: '',
+            fillRect: () => undefined,
+            fillText: () => undefined,
+            putImageData: () => undefined,
+            createImageData: (w: number, h: number) => ({
+                data: new Uint8ClampedArray(w * h * 4),
+                width: w,
+                height: h,
+            }),
+        } as unknown as CanvasRenderingContext2D;
+    },
+    renderImageToCanvas: () => undefined,
+}));
+
 // Mock requestAnimationFrame (happy-dom stubs it but we want control)
 beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', (_cb: FrameRequestCallback) => 0);
