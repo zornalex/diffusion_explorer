@@ -14,6 +14,7 @@
 <nav id="navbar">
   <div class="nav-inner">
     <a class="nav-brand" href="#">◈ Diffusion Explainer</a>
+    <span id="app-version" class="nav-version"></span>
     <div class="nav-links">
       <a href="#section-architecture">Architektur</a>
       <a href="#section-draw">Draw & Train</a>
@@ -313,15 +314,6 @@
             </div>
           </div>
 
-          <!-- Milestone previews (shown after training milestones) -->
-          <div class="milestone-row" id="milestone-row" style="display:none">
-            <p class="debug-title">Generated samples at training milestones:</p>
-            <div class="milestone-canvases">
-              <div class="milestone-item"><canvas id="ms-200"></canvas><span>Step 200</span></div>
-              <div class="milestone-item"><canvas id="ms-800"></canvas><span>Step 800</span></div>
-              <div class="milestone-item"><canvas id="ms-final"></canvas><span>Step 2000</span></div>
-            </div>
-          </div>
         </div>
 
       </div><!-- /.col-demo -->

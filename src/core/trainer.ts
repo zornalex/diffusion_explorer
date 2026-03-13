@@ -2,6 +2,32 @@ import * as tf from '@tensorflow/tfjs';
 import { CONFIG } from './config';
 import { DiffusionModel } from './diffusion';
 
+/** Linear warmup then cosine decay to 0. Pure function for testability. */
+export function computeLR(step: number, totalSteps: number, peakLR: number, warmupSteps: number): number {
+    if (step < warmupSteps) {
+        return peakLR * (step / warmupSteps);
+    }
+    const decaySteps = totalSteps - warmupSteps;
+    const decayProgress = (step - warmupSteps) / decaySteps;
+    return peakLR * 0.5 * (1 + Math.cos(Math.PI * decayProgress));
+}
+
+/** EMA update: decay * old + (1-decay) * new. Pure for testing. */
+export function emaUpdate(decay: number, oldVal: number, newVal: number): number {
+    return decay * oldVal + (1 - decay) * newVal;
+}
+
+/** Check if training should stop: loss hasn't improved by threshold over patience steps. */
+export function shouldEarlyStop(lossHistory: number[], patience: number, threshold: number): boolean {
+    if (lossHistory.length < patience) return false;
+    const recent = lossHistory.slice(-patience);
+    const oldest = recent[0];
+    const newest = recent[recent.length - 1];
+    if (oldest <= 0) return true;
+    const relativeImprovement = (oldest - newest) / oldest;
+    return relativeImprovement < threshold;
+}
+
 export interface DebugFrame {
     t: number;
     x0: Float32Array;
@@ -21,6 +47,7 @@ export class ModelTrainer {
     private model: tf.LayersModel;
     private diffusion: DiffusionModel;
     private isTraining: boolean = false;
+    private emaWeights: tf.Variable[] | null = null;
 
     /** All denoising frames from the last generateImage() call */
     public lastFrames: DenoisingFrame[] = [];
@@ -38,6 +65,7 @@ export class ModelTrainer {
             model.compile({ optimizer: tf.train.adam(CONFIG.learningRate), loss: 'meanSquaredError' });
             this.model.dispose();
             this.model = model;
+            this.disposeEMA(); // clear stale EMA from previous model
             console.log('✅ Pretrained model loaded');
         } catch (err) {
             console.warn('Pretrained model load failed:', err);
@@ -143,6 +171,9 @@ export class ModelTrainer {
         const T  = this.diffusion.getTimesteps();
         const S  = CONFIG.imageSize;
 
+        this.initEMA();
+        const lossHistory: number[] = [];
+
         for (let step = 0; step < CONFIG.trainingSteps; step++) {
             if (!this.isTraining) break;
 
@@ -175,6 +206,11 @@ export class ModelTrainer {
             tVals.forEach((t, i) => tEmbFlat.set(this.sinEmb(t / T, TD), i * TD));
             const tBatch  = tf.tensor2d(tEmbFlat, [batchSize, TD]);
 
+            // Apply LR schedule: linear warmup then cosine decay
+            const currentLR = computeLR(step, CONFIG.trainingSteps, CONFIG.learningRate, CONFIG.lrWarmupSteps);
+            // Adam optimizer stores LR as settable property; cast needed since tf.Optimizer doesn't expose it
+            (this.model.optimizer as unknown as { learningRate: number }).learningRate = currentLR;
+
             const history = await this.model.fit([xtBatch, tBatch], epsBatch, { epochs: 1, verbose: 0 });
             const loss    = history.history.loss[0] as number;
 
@@ -184,9 +220,19 @@ export class ModelTrainer {
                 break;
             }
 
-            // ── Debug frame: download only one item, only every 10 steps ─────
+            this.updateEMA();
+
+            lossHistory.push(loss);
+            if (shouldEarlyStop(lossHistory, CONFIG.earlyStopPatience, CONFIG.earlyStopThreshold)) {
+                console.log(`Early stopping at step ${step + 1} (loss plateau: ${loss.toFixed(5)})`);
+                tf.dispose([x0Batch, epsBatch, sqrtAB, sqrtOMAB, xtBatch, tBatch]);
+                onStepEnd(step + 1, loss);
+                break;
+            }
+
+            // ── Debug frame: download only one item, only every N steps ──────
             let debug: DebugFrame | undefined;
-            if (step % 10 === 0) {
+            if (step % CONFIG.debugFrameInterval === 0) {
                 const [xtData, epsData] = await Promise.all([
                     xtBatch.slice([0, 0, 0, 0], [1, S, S, 1]).data(),
                     epsBatch.slice([0, 0, 0, 0], [1, S, S, 1]).data(),
@@ -201,7 +247,7 @@ export class ModelTrainer {
 
             tf.dispose([x0Batch, epsBatch, sqrtAB, sqrtOMAB, xtBatch, tBatch]);
             onStepEnd(step + 1, loss, debug);
-            await tf.nextFrame();
+            if (step % CONFIG.nextFrameInterval === 0) await tf.nextFrame();
         }
 
         this.isTraining = false;
@@ -228,65 +274,120 @@ export class ModelTrainer {
         reportEvery = 1
     ) {
         this.lastFrames = [];
-        let x = tf.randomNormal([1, CONFIG.imageSize, CONFIG.imageSize, 1]);
-        const T = this.diffusion.getTimesteps();
-        const eps = 1e-8;
+        const originals = this.applyEMA();
+        try {
+            let x = tf.randomNormal([1, CONFIG.imageSize, CONFIG.imageSize, 1]);
+            const T = this.diffusion.getTimesteps();
+            const eps = 1e-8;
 
-        const TD = CONFIG.timeDim;
+            const TD = CONFIG.timeDim;
 
-        for (let t = T; t >= 1; t--) {
-            const tNorm   = t / T;
-            const tTensor = tf.tensor2d([Array.from(this.sinEmb(tNorm, TD))], [1, TD]);
+            for (let t = T; t >= 1; t--) {
+                const tNorm   = t / T;
+                const tTensor = tf.tensor2d([Array.from(this.sinEmb(tNorm, TD))], [1, TD]);
 
-            const predictedNoise = this.model.predict([x, tTensor]) as tf.Tensor;
+                const predictedNoise = this.model.predict([x, tTensor]) as tf.Tensor;
 
-            const alpha_t        = this.diffusion.getAlpha(t - 1);
-            const alphaBar_t     = this.diffusion.getAlphaBar(t - 1);
-            const alphaBar_prev  = this.diffusion.getAlphaBar(t - 2);
-            const beta_t         = 1 - alpha_t;
-            const sqrtAlpha      = Math.sqrt(alpha_t);
-            const sqrtOMaB       = Math.sqrt(Math.max(1 - alphaBar_t, eps));
-            const betaTilde      = (Math.max(1 - alphaBar_prev, eps) / Math.max(1 - alphaBar_t, eps)) * beta_t;
-            const sigma_t        = Math.sqrt(Math.max(betaTilde, 0));
-            const coeff          = beta_t / sqrtOMaB;
+                const alpha_t        = this.diffusion.getAlpha(t - 1);
+                const alphaBar_t     = this.diffusion.getAlphaBar(t - 1);
+                const alphaBar_prev  = this.diffusion.getAlphaBar(t - 2);
+                const beta_t         = 1 - alpha_t;
+                const sqrtAlpha      = Math.sqrt(alpha_t);
+                const sqrtOMaB       = Math.sqrt(Math.max(1 - alphaBar_t, eps));
+                const betaTilde      = (Math.max(1 - alphaBar_prev, eps) / Math.max(1 - alphaBar_t, eps)) * beta_t;
+                const sigma_t        = Math.sqrt(Math.max(betaTilde, 0));
+                const coeff          = beta_t / sqrtOMaB;
 
-            const clippedNoise   = tf.clipByValue(predictedNoise, -1.5, 1.5);
-            const z              = t > 1 ? tf.randomNormal([1, CONFIG.imageSize, CONFIG.imageSize, 1]) : tf.zeros([1, CONFIG.imageSize, CONFIG.imageSize, 1]);
-            const xPrevRaw       = x.sub(clippedNoise.mul(coeff)).div(sqrtAlpha).add(z.mul(sigma_t));
-            const xPrev          = tf.clipByValue(xPrevRaw, -1.2, 1.2);
+                const clippedNoise   = tf.clipByValue(predictedNoise, -1.5, 1.5);
+                const z              = t > 1 ? tf.randomNormal([1, CONFIG.imageSize, CONFIG.imageSize, 1]) : tf.zeros([1, CONFIG.imageSize, CONFIG.imageSize, 1]);
+                const xPrevRaw       = x.sub(clippedNoise.mul(coeff)).div(sqrtAlpha).add(z.mul(sigma_t));
+                const xPrev          = tf.clipByValue(xPrevRaw, -1.2, 1.2);
 
-            // Cache frame (every ~20 steps for strip; always store t=0)
-            if (t % 20 === 0 || t === 1 || t === T) {
-                const [xtData, epsData, xpData] = await Promise.all([
-                    x.data(),
-                    clippedNoise.data(),
-                    xPrev.data(),
-                ]);
-                this.lastFrames.push({
-                    t,
-                    xt:      new Float32Array(xtData),
-                    epsPred: new Float32Array(epsData),
-                    xPrev:   new Float32Array(xpData),
-                });
+                // Cache frame (every ~20 steps for strip; always store t=0)
+                if (t % 20 === 0 || t === 1 || t === T) {
+                    const [xtData, epsData, xpData] = await Promise.all([
+                        x.data(),
+                        clippedNoise.data(),
+                        xPrev.data(),
+                    ]);
+                    this.lastFrames.push({
+                        t,
+                        xt:      new Float32Array(xtData),
+                        epsPred: new Float32Array(epsData),
+                        xPrev:   new Float32Array(xpData),
+                    });
+                }
+
+                x.dispose();
+                xPrevRaw.dispose();
+                x = xPrev;
+                tf.dispose([tTensor, predictedNoise, clippedNoise, z]);
+
+                if (t % reportEvery === 0 || t === 1) {
+                    const data = await x.data() as Float32Array;
+                    onStep(t, data, T - t);
+                }
+
+                await tf.nextFrame();
             }
 
             x.dispose();
-            xPrevRaw.dispose();
-            x = xPrev;
-            tf.dispose([tTensor, predictedNoise, clippedNoise, z]);
 
-            if (t % reportEvery === 0 || t === 1) {
-                const data = await x.data() as Float32Array;
-                onStep(t, data, T - t);
-            }
-
-            await tf.nextFrame();
+            // Sort frames t descending (T → 0) for strip display
+            this.lastFrames.sort((a, b) => b.t - a.t);
+        } finally {
+            if (originals) this.restoreWeights(originals);
         }
+    }
 
-        x.dispose();
+    // ─── EMA (Exponential Moving Average) weight management ─────────────────
 
-        // Sort frames t descending (T → 0) for strip display
-        this.lastFrames.sort((a, b) => b.t - a.t);
+    /** Copy current model weights into EMA shadow as tf.Variables (GPU-resident). */
+    private initEMA(): void {
+        this.disposeEMA();
+        // getWeights() returns shared references to the model's actual weight tensors.
+        // Do NOT dispose them — only clone into EMA variables.
+        this.emaWeights = this.model.getWeights().map(w => tf.variable(w.clone()));
+    }
+
+    /** Update EMA weights on GPU: ema = decay * ema + (1-decay) * current. No CPU round-trip. */
+    private updateEMA(): void {
+        if (!this.emaWeights) return;
+        const decay = CONFIG.emaDecay;
+        // getWeights() returns the model's actual Variable objects — shared references.
+        // We only READ from them inside tf.tidy; we do NOT dispose them.
+        const currentWeights = this.model.getWeights();
+        tf.tidy(() => {
+            for (let i = 0; i < currentWeights.length; i++) {
+                const updated = this.emaWeights![i].mul(decay).add(currentWeights[i].mul(1 - decay));
+                this.emaWeights![i].assign(updated);
+            }
+        });
+        // Do NOT dispose currentWeights — they are the model's own Variables.
+    }
+
+    /** Swap EMA weights into model for generation, return cloned originals for restore.
+     *  We clone the current weights so restoreWeights() can safely dispose them. */
+    private applyEMA(): tf.Tensor[] | null {
+        if (!this.emaWeights) return null;
+        // Clone training weights BEFORE overwriting — clones are owned by us, safe to dispose.
+        const originals = this.model.getWeights().map(w => w.clone());
+        this.model.setWeights(this.emaWeights);
+        return originals;
+    }
+
+    /** Restore original training weights (from clones) after generation. */
+    private restoreWeights(originals: tf.Tensor[]): void {
+        this.model.setWeights(originals);
+        originals.forEach(t => t.dispose()); // clones — safe to dispose
+    }
+
+    /** Clean up EMA tensors. Called on model reload and before re-init. */
+    private disposeEMA(): void {
+        if (this.emaWeights) {
+            this.emaWeights.forEach(v => v.dispose());
+            this.emaWeights = null;
+        }
     }
 
     // ─── Save / Load ─────────────────────────────────────────────────────────
@@ -308,6 +409,7 @@ export class ModelTrainer {
             m.compile({ optimizer: tf.train.adam(CONFIG.learningRate), loss: 'meanSquaredError' });
             this.model.dispose();
             this.model = m;
+            this.disposeEMA(); // clear stale EMA from previous model
             return true;
         } catch { return false; }
     }
@@ -318,6 +420,7 @@ export class ModelTrainer {
             m.compile({ optimizer: tf.train.adam(CONFIG.learningRate), loss: 'meanSquaredError' });
             this.model.dispose();
             this.model = m;
+            this.disposeEMA(); // clear stale EMA from previous model
             return true;
         } catch { return false; }
     }
