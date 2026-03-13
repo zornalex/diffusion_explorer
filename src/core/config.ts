@@ -1,19 +1,23 @@
 export const CONFIG = {
-    // Canvas & Image Settings
-    imageSize: 32, //square image size
-
-    // Diffusion Settings
-    timesteps: 400, // Number of steps T
+    imageSize: 32,
+    timesteps: 400,
     betaStart: 0.0001,
     betaEnd: 0.02,
+    batchSize: 8,
+    trainingSteps: 500,       // was 2000; pretrained model converges in 300-500
+    learningRate: 0.001,
+    timeDim: 16,
 
-    // Training Settings
-    batchSize: 8,            // small batches → less GPU↔CPU overhead per step
-    trainingSteps: 2000,     // 4× more steps → ~8 visits per (t,image) pair, much better convergence
-    learningRate: 0.001,     // Adam lr for fine-tuning
-    timeDim: 16,             // sinusoidal time-embedding dimension (8 sin + 8 cos frequencies)
+    // Training Quality Settings
+    lrWarmupSteps: 10,
+    emaDecay: 0.999,
+    earlyStopPatience: 50,
+    earlyStopThreshold: 0.01,
 
-    // UI Settings
+    // Training Loop Performance
+    nextFrameInterval: 20,
+    debugFrameInterval: 50,
+
     colors: {
         primary: '#646cff',
         background: '#242424',

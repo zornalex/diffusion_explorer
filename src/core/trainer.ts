@@ -184,9 +184,9 @@ export class ModelTrainer {
                 break;
             }
 
-            // ── Debug frame: download only one item, only every 10 steps ─────
+            // ── Debug frame: download only one item, only every N steps ──────
             let debug: DebugFrame | undefined;
-            if (step % 10 === 0) {
+            if (step % CONFIG.debugFrameInterval === 0) {
                 const [xtData, epsData] = await Promise.all([
                     xtBatch.slice([0, 0, 0, 0], [1, S, S, 1]).data(),
                     epsBatch.slice([0, 0, 0, 0], [1, S, S, 1]).data(),
@@ -201,7 +201,7 @@ export class ModelTrainer {
 
             tf.dispose([x0Batch, epsBatch, sqrtAB, sqrtOMAB, xtBatch, tBatch]);
             onStepEnd(step + 1, loss, debug);
-            await tf.nextFrame();
+            if (step % CONFIG.nextFrameInterval === 0) await tf.nextFrame();
         }
 
         this.isTraining = false;

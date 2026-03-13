@@ -14,8 +14,8 @@ describe('CONFIG', () => {
         expect(CONFIG.betaStart).toBeLessThan(CONFIG.betaEnd);
     });
 
-    it('has trainingSteps of 2000 (matching milestone labels)', () => {
-        expect(CONFIG.trainingSteps).toBe(2000);
+    it('has trainingSteps of 500 (pretrained model converges in 300-500)', () => {
+        expect(CONFIG.trainingSteps).toBe(500);
     });
 
     it('has timeDim of 16 (sinusoidal embedding dimension)', () => {

@@ -50,7 +50,6 @@ const genProgressValue  = document.getElementById('gen-progress-value') as HTMLS
 const genProgressMax    = document.getElementById('gen-progress-max')  as HTMLSpanElement;
 const progressFill     = document.getElementById('training-progress-fill') as HTMLElement;
 const progressLabel    = document.getElementById('training-progress-label') as HTMLElement;
-const milestoneRow     = document.getElementById('milestone-row')      as HTMLElement;
 const btnRoboticsPlay  = document.getElementById('btn-robotics-play')  as HTMLButtonElement;
 const btnFlowPlay      = document.getElementById('btn-flow-play')      as HTMLButtonElement;
 
@@ -112,7 +111,6 @@ btnTrain.addEventListener('click', async () => {
 
     setBtnTrain('running');
     lossChart.reset();
-    milestoneRow.style.display = 'none';
 
     const dbgX0Ctx    = initDebugCanvas('debug-x0');
     const dbgXtCtx    = initDebugCanvas('debug-xt');
@@ -135,27 +133,11 @@ btnTrain.addEventListener('click', async () => {
             renderImageToCanvas(dbg.xt, dbgXtCtx);
             renderImageToCanvas(dbg.epsilon, dbgNoiseCtx);
         }
-
-        // Milestone previews (at ~10%, ~40%, 100% of training)
-        if (step === 200 || step === 800 || step === CONFIG.trainingSteps) {
-            const msId = step === 200 ? 'ms-200' : step === 800 ? 'ms-800' : 'ms-final';
-            milestoneRow.style.display = '';
-            const msCtx = initDebugCanvas(msId);
-            (document.getElementById(msId) as HTMLCanvasElement).style.width = '80px';
-            (document.getElementById(msId) as HTMLCanvasElement).style.height = '80px';
-            await runQuickGenForPreview(msCtx);
-        }
     });
 
     setBtnTrain('idle');
     btnGenerate.disabled = false;
 });
-
-async function runQuickGenForPreview(ctx: CanvasRenderingContext2D) {
-    await trainer.generateImage((_t, data, _p) => {
-        renderImageToCanvas(data, ctx);
-    }, 40); // report every 40 steps for speed
-}
 
 function setBtnTrain(state: 'idle' | 'running') {
     btnTrain.dataset.state = state;
