@@ -1,5 +1,5 @@
 import './style.css';
-import { CONFIG }                          from './core/config';
+import { APP_VERSION, CONFIG }             from './core/config';
 import { DiffusionModel }                  from './core/diffusion';
 import { ModelTrainer }                    from './core/trainer';
 import { LossChart }                       from './components/lossChart';
@@ -54,6 +54,9 @@ const btnRoboticsPlay  = document.getElementById('btn-robotics-play')  as HTMLBu
 const btnFlowPlay      = document.getElementById('btn-flow-play')      as HTMLButtonElement;
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Version indicator ───────────────────────────────────────────────────────
+(document.getElementById('app-version') as HTMLSpanElement).textContent = `v${APP_VERSION}`;
+
 const T = diffusion.getTimesteps();
 maxEpochsEl.textContent       = CONFIG.trainingSteps.toString();
 genProgressSlider.max         = T.toString();

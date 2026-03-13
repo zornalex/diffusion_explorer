@@ -209,6 +209,18 @@ code {
   flex-shrink: 0;
 }
 
+.nav-version {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
 .nav-links {
   display: flex;
   gap: 2rem;

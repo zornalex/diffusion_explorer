@@ -1,3 +1,6 @@
+/** Semantic version — bump on every feature branch merge to main. */
+export const APP_VERSION = '0.2.1';
+
 export const CONFIG = {
     imageSize: 32,
     timesteps: 400,
