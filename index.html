@@ -131,11 +131,14 @@
             </div>
 
             <div class="forward-controls">
-              <span class="mono" style="font-size:0.75rem;color:var(--text-muted)">Clean</span>
-              <input type="range" id="forward-slider" min="0" max="400" value="0" class="forward-slider" />
-              <span class="mono" style="font-size:0.75rem;color:var(--text-muted)">Pure noise</span>
+              <button id="forward-play-btn" class="forward-play-btn">▶ Play</button>
+              <div class="forward-slider-row">
+                <span class="mono" style="font-size:0.75rem;color:var(--text-muted)">Clean</span>
+                <input type="range" id="forward-slider" min="0" max="400" value="0" class="forward-slider" />
+                <span class="mono" style="font-size:0.75rem;color:var(--text-muted)">Pure noise</span>
+              </div>
             </div>
-            <p class="hint">← Schieberegler bewegen um Rauschen zu kontrollieren</p>
+            <p class="hint">← Schieberegler oder Play-Button</p>
           </div>
         </div>
       </div>

@@ -206,7 +206,8 @@ btnGenerate.addEventListener('click', async () => {
 // ─── Architecture section ─────────────────────────────────────────────────────
 
 const forwardDemo = new ForwardProcessDemo(
-    'forward-canvas', 'forward-slider', 'forward-t-label', 'forward-alpha-bar-label', diffusion
+    'forward-canvas', 'forward-slider', 'forward-t-label', 'forward-alpha-bar-label',
+    'forward-play-btn', diffusion
 );
 forwardDemo.setBaseImage(SMILEY_PRESETS[0]);
 
