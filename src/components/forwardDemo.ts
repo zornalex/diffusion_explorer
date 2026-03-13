@@ -22,7 +22,6 @@ export class ForwardProcessDemo {
     private readonly diffusion: DiffusionModel;
 
     private baseImage: Float32Array | null = null;
-    private epsilon: Float32Array | null = null;
     private frames: Float32Array[] = [];
 
     private _isPlaying = false;
@@ -78,7 +77,6 @@ export class ForwardProcessDemo {
     public setBaseImage(img: Float32Array): void {
         this.stopPlayback();
         this.baseImage = img;
-        this.epsilon = this.sampleGaussian(img.length);
         this.precompute();
         this._currentT = 0;
         this.slider.value = '0';
@@ -94,13 +92,32 @@ export class ForwardProcessDemo {
 
     // ── Precomputation ──────────────────────────────────────────────────────
 
+    /**
+     * Build frames iteratively: x_t = √α_t · x_{t-1} + √(1−α_t) · ε_t
+     *
+     * Each step adds a fresh, independent Gaussian sample to the *previous*
+     * noisy image — the same Markov-chain process used in the DDPM paper.
+     * This looks clearly "additive" to the eye, unlike the closed-form
+     * x_t = √ᾱ_t·x₀ + √(1−ᾱ_t)·ε which applies a single rescaled epsilon
+     * and reads as a smooth opacity fade.
+     */
     private precompute(): void {
-        if (!this.baseImage || !this.epsilon) return;
+        if (!this.baseImage) return;
         const T = this.diffusion.getTimesteps();
+        const n = this.baseImage.length;
         this.frames = new Array(T + 1);
-        this.frames[0] = new Float32Array(this.baseImage); // clean copy at t=0
+        this.frames[0] = new Float32Array(this.baseImage); // clean image at t=0
         for (let t = 1; t <= T; t++) {
-            this.frames[t] = this.diffusion.addNoiseWithEpsilon(this.baseImage, t, this.epsilon);
+            const alpha = this.diffusion.getAlpha(t - 1); // α_t = 1 − β_t
+            const sqrtAlpha = Math.sqrt(alpha);
+            const sqrtOneMinusAlpha = Math.sqrt(1 - alpha);
+            const prev = this.frames[t - 1];
+            const noise = this.sampleGaussian(n);          // fresh ε_t per step
+            const frame = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                frame[i] = sqrtAlpha * prev[i] + sqrtOneMinusAlpha * noise[i];
+            }
+            this.frames[t] = frame;
         }
     }
 

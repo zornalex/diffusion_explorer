@@ -345,17 +345,17 @@ export class ModelTrainer {
     /** Copy current model weights into EMA shadow as tf.Variables (GPU-resident). */
     private initEMA(): void {
         this.disposeEMA();
-        this.emaWeights = this.model.getWeights().map(w => {
-            const v = tf.variable(w.clone());
-            w.dispose();
-            return v;
-        });
+        // getWeights() returns shared references to the model's actual weight tensors.
+        // Do NOT dispose them — only clone into EMA variables.
+        this.emaWeights = this.model.getWeights().map(w => tf.variable(w.clone()));
     }
 
     /** Update EMA weights on GPU: ema = decay * ema + (1-decay) * current. No CPU round-trip. */
     private updateEMA(): void {
         if (!this.emaWeights) return;
         const decay = CONFIG.emaDecay;
+        // getWeights() returns the model's actual Variable objects — shared references.
+        // We only READ from them inside tf.tidy; we do NOT dispose them.
         const currentWeights = this.model.getWeights();
         tf.tidy(() => {
             for (let i = 0; i < currentWeights.length; i++) {
@@ -363,21 +363,23 @@ export class ModelTrainer {
                 this.emaWeights![i].assign(updated);
             }
         });
-        currentWeights.forEach(w => w.dispose());
+        // Do NOT dispose currentWeights — they are the model's own Variables.
     }
 
-    /** Swap EMA weights into model for generation, return originals for restore. */
+    /** Swap EMA weights into model for generation, return cloned originals for restore.
+     *  We clone the current weights so restoreWeights() can safely dispose them. */
     private applyEMA(): tf.Tensor[] | null {
         if (!this.emaWeights) return null;
-        const originals = this.model.getWeights();
-        this.model.setWeights(this.emaWeights.map(v => v));
+        // Clone training weights BEFORE overwriting — clones are owned by us, safe to dispose.
+        const originals = this.model.getWeights().map(w => w.clone());
+        this.model.setWeights(this.emaWeights);
         return originals;
     }
 
-    /** Restore original training weights after generation. */
+    /** Restore original training weights (from clones) after generation. */
     private restoreWeights(originals: tf.Tensor[]): void {
         this.model.setWeights(originals);
-        originals.forEach(t => t.dispose());
+        originals.forEach(t => t.dispose()); // clones — safe to dispose
     }
 
     /** Clean up EMA tensors. Called on model reload and before re-init. */
